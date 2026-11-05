@@ -277,11 +277,12 @@ elif page == "敏感性分析":
                 })
 
                 # 生成更密集的点用于平滑曲线
+                # 生成更密集的点用于平滑曲线
                 x_smooth = np.linspace(min_val, max_val, 200)
-                # 如果点数太少不能插值，就直接用原始数据
                 if len(x_vals) >= 4:
-                    # 三次样条插值（平滑）
-                    spl = spi.make_interp_spline(x_vals, y_vals, k=3)
+                    # 使用 Pchip 保形插值，绝对不会产生反弹过冲
+                    from scipy.interpolate import PchipInterpolator
+                    spl = PchipInterpolator(x_vals, y_vals)
                     y_smooth = spl(x_smooth)
                 else:
                     x_smooth = x_vals
