@@ -12,7 +12,7 @@ st.set_page_config(page_title="屈曲载荷预测系统", page_icon="🛡️", l
 
 @st.cache_resource
 def load_assets():
-    model = joblib.load('best_model_xgb.pkl')
+    model = joblib.load('best_model1.pkl')
     data = Data()
     return model, data
 
