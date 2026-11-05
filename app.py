@@ -233,7 +233,7 @@ elif page == "敏感性分析":
             default_max = float(default[target_feature]) * 3 + 10.0
             min_val = st.number_input("最小值", value=default_min, step=0.1)
             max_val = st.number_input("最大值", value=max(default_max, min_val + 1.0), step=0.1)
-            steps = st.slider("采样点数 (建议 15-30 之间)", min_value=10, max_value=500, value=20, step=5)
+            steps = st.slider("采样点数 (建议 15-30 之间)", min_value=10, max_value=50, value=20, step=5)
             
             st.markdown("---")
             st.markdown("### 📌 其他基准参数")
