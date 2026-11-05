@@ -319,9 +319,6 @@ elif page == "敏感性分析":
                 # 把散点画在曲线上面，形成“散点+曲线”的高级感
                 st.altair_chart((line + points).interactive(), use_container_width=True)
                 
-                # 合并图层
-                st.altair_chart((line + points).interactive(), use_container_width=True)
-                
                 # 添加结论性文字
                 st.success(f"""
                 **规律洞察**：随着【{trans[target_feature]}】从 {min_val} 增加到 {max_val}，
