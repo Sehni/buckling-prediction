@@ -233,7 +233,7 @@ elif page == "敏感性分析":
             default_max = float(default[target_feature]) * 3 + 10.0
             min_val = st.number_input("最小值", value=default_min, step=0.1)
             max_val = st.number_input("最大值", value=max(default_max, min_val + 1.0), step=0.1)
-            steps = st.slider("采样点数", min_value=10, max_value=100, value=50, step=10)
+            steps = st.slider("采样点数 (建议 15-30 之间)", min_value=10, max_value=500, value=20, step=5)
             
             st.markdown("---")
             st.markdown("### 📌 其他基准参数")
@@ -294,17 +294,30 @@ elif page == "敏感性分析":
                 
                 # 使用 Altair 绘制高级图表（同时包含真实预测点和趋势线）
                 # 真实预测点（为了体现模型的真实计算结果）
-                points = alt.Chart(df_result).mark_circle(size=60, color='#007bff').encode(
-                    x=alt.X(trans[target_feature], title=trans[target_feature]),
-                    y=alt.Y('预测屈曲载荷 (MPa)', title='屈曲载荷 (MPa)'),
+                # 💡 优化样式：把散点变大一点，改成空心或者半透明，曲线加粗
+                points = alt.Chart(df_result).mark_circle(
+                    size=80, 
+                    color='#007bff', 
+                    opacity=0.8,
+                    stroke='white',
+                    strokeWidth=1.5
+                ).encode(
+                    x=alt.X(trans[target_feature], title=trans[target_feature], scale=alt.Scale(zero=False)),
+                    y=alt.Y('预测屈曲载荷 (MPa)', title='屈曲载荷 (MPa)', scale=alt.Scale(zero=False)),
                     tooltip=[trans[target_feature], '预测屈曲载荷 (MPa)']
                 )
                 
-                # 平滑趋势线
-                line = alt.Chart(df_smooth).mark_line(color='#00bcd4', strokeWidth=3).encode(
+                line = alt.Chart(df_smooth).mark_line(
+                    color='#00bcd4', 
+                    strokeWidth=3,
+                    opacity=0.7
+                ).encode(
                     x=trans[target_feature],
                     y='平滑趋势线 (MPa)'
                 )
+                
+                # 把散点画在曲线上面，形成“散点+曲线”的高级感
+                st.altair_chart((line + points).interactive(), use_container_width=True)
                 
                 # 合并图层
                 st.altair_chart((line + points).interactive(), use_container_width=True)
