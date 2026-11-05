@@ -254,7 +254,6 @@ elif page == "敏感性分析":
             
             # 生成扫描数据
             x_vals = np.linspace(min_val, max_val, steps)
-            # 构建 DataFrame
             plot_data = []
             for x in x_vals:
                 row = base_values.copy()
@@ -268,20 +267,53 @@ elif page == "敏感性分析":
                 with st.spinner("模型计算中..."):
                     y_vals = predict(df_plot)
                 
-                # 绘制结果
+                # 💡 核心升级：使用 Scipy 插值进行平滑处理
+                import scipy.interpolate as spi
+                import altair as alt
+                
                 df_result = pd.DataFrame({
                     trans[target_feature]: x_vals,
                     '预测屈曲载荷 (MPa)': y_vals
                 })
+
+                # 生成更密集的点用于平滑曲线
+                x_smooth = np.linspace(min_val, max_val, 200)
+                # 如果点数太少不能插值，就直接用原始数据
+                if len(x_vals) >= 4:
+                    # 三次样条插值（平滑）
+                    spl = spi.make_interp_spline(x_vals, y_vals, k=3)
+                    y_smooth = spl(x_smooth)
+                else:
+                    x_smooth = x_vals
+                    y_smooth = y_vals
+                    
+                df_smooth = pd.DataFrame({
+                    trans[target_feature]: x_smooth,
+                    '平滑趋势线 (MPa)': y_smooth
+                })
                 
-                # 使用 Streamlit 自带的折线图
-                st.line_chart(df_result, x=trans[target_feature], y='预测屈曲载荷 (MPa)', color="#00bcd4")
+                # 使用 Altair 绘制高级图表（同时包含真实预测点和趋势线）
+                # 真实预测点（为了体现模型的真实计算结果）
+                points = alt.Chart(df_result).mark_circle(size=60, color='#007bff').encode(
+                    x=alt.X(trans[target_feature], title=trans[target_feature]),
+                    y=alt.Y('预测屈曲载荷 (MPa)', title='屈曲载荷 (MPa)'),
+                    tooltip=[trans[target_feature], '预测屈曲载荷 (MPa)']
+                )
                 
-                # 添加一些结论性的文字
+                # 平滑趋势线
+                line = alt.Chart(df_smooth).mark_line(color='#00bcd4', strokeWidth=3).encode(
+                    x=trans[target_feature],
+                    y='平滑趋势线 (MPa)'
+                )
+                
+                # 合并图层
+                st.altair_chart((line + points).interactive(), use_container_width=True)
+                
+                # 添加结论性文字
                 st.success(f"""
                 **规律洞察**：随着【{trans[target_feature]}】从 {min_val} 增加到 {max_val}，
                 屈曲载荷从 **{y_vals[0]:.4f} MPa** 变化到了 **{y_vals[-1]:.4f} MPa**。
-                变化斜率为 {(y_vals[-1] - y_vals[0]) / (max_val - min_val):.4f} MPa/单位。
+                整体变化斜率为 {(y_vals[-1] - y_vals[0]) / (max_val - min_val):.4f} MPa/单位。
                 """)
             except Exception as e:
                 st.error(f"计算出错: {e}")
