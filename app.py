@@ -196,3 +196,114 @@ elif page == "批量 Excel 预测":
                     
                 except Exception as e:
                     st.error(f"❌ 处理失败，错误信息：{e}")
+
+# ==========================================
+# 5. 页面四：敏感性分析
+# ==========================================
+elif page == "敏感性分析":
+    st.title("📊 缺陷参数敏感性分析")
+    st.markdown("""
+    本章节通过调用随机森林模型进行“虚拟实验”，分析当单一缺陷参数变化时，对封头屈曲载荷的影响规律。
+    **无需重新进行耗时的有限元仿真，即可快速评估缺陷敏感度。**
+    """)
+    
+    # 分为两个 Tab：单变量敏感性、全局特征重要性
+    tab1, tab2 = st.tabs(["📈 单变量敏感性曲线 (定量)", "🏆 全局特征重要性 (定性)"])
+    
+    # --- Tab 1: 单变量敏感性曲线 ---
+    with tab1:
+        col_ctrl, col_chart = st.columns([1, 2.5])
+        
+        with col_ctrl:
+            st.markdown("### ⚙️ 实验设置")
+            st.info("保持其他参数不变，单独调节一个参数，观察载荷变化。")
+            
+            # 1. 选择要分析的参数
+            target_feature = st.selectbox(
+                "选择要分析的参数", 
+                options=raw_features,
+                format_func=lambda x: trans[x], # 显示中文名
+                index=raw_features.index('top') # 默认选中鼓包高度
+            )
+            
+            # 2. 设置扫描范围
+            st.write("设置扫描范围：")
+            # 默认根据原特征适当放宽范围
+            default_min = 0.0
+            default_max = float(default[target_feature]) * 3 + 10.0
+            min_val = st.number_input("最小值", value=default_min, step=0.1)
+            max_val = st.number_input("最大值", value=max(default_max, min_val + 1.0), step=0.1)
+            steps = st.slider("采样点数", min_value=10, max_value=100, value=50, step=10)
+            
+            st.markdown("---")
+            st.markdown("### 📌 其他基准参数")
+            st.caption("其他参数保持默认值或在此微调：")
+            
+            # 为了方便不把页面撑太长，用一个折叠面板设置基准值
+            base_values = {}
+            with st.expander("展开修改基准参数"):
+                for f in raw_features:
+                    if f != target_feature:
+                        base_values[f] = st.number_input(f"{trans[f]}", value=float(default[f]), step=0.1)
+            if not base_values:
+                # 如果用户没展开，直接用默认值
+                base_values = {f: default[f] for f in raw_features if f != target_feature}
+
+        with col_chart:
+            st.markdown(f"### 📈 {trans[target_feature]} 对屈曲载荷的影响")
+            
+            # 生成扫描数据
+            x_vals = np.linspace(min_val, max_val, steps)
+            # 构建 DataFrame
+            plot_data = []
+            for x in x_vals:
+                row = base_values.copy()
+                row[target_feature] = x
+                plot_data.append(row)
+            
+            df_plot = pd.DataFrame(plot_data, columns=raw_features)
+            
+            # 调用模型预测
+            try:
+                with st.spinner("模型计算中..."):
+                    y_vals = predict(df_plot)
+                
+                # 绘制结果
+                df_result = pd.DataFrame({
+                    trans[target_feature]: x_vals,
+                    '预测屈曲载荷 (MPa)': y_vals
+                })
+                
+                # 使用 Streamlit 自带的折线图
+                st.line_chart(df_result, x=trans[target_feature], y='预测屈曲载荷 (MPa)', color="#00bcd4")
+                
+                # 添加一些结论性的文字
+                st.success(f"""
+                **规律洞察**：随着【{trans[target_feature]}】从 {min_val} 增加到 {max_val}，
+                屈曲载荷从 **{y_vals[0]:.4f} MPa** 变化到了 **{y_vals[-1]:.4f} MPa**。
+                变化斜率为 {(y_vals[-1] - y_vals[0]) / (max_val - min_val):.4f} MPa/单位。
+                """)
+            except Exception as e:
+                st.error(f"计算出错: {e}")
+
+    # --- Tab 2: 全局特征重要性 ---
+    with tab2:
+        st.markdown("### 全局特征重要性排名")
+        st.markdown("基于随机森林模型内部评估机制，反映所有特征对屈曲载荷的整体影响权重。")
+        
+        # 提取特征重要性
+        importances = model.feature_importances_
+        feature_names_model = model.feature_names_in_
+        
+        # 构造 DataFrame 并排序
+        df_imp = pd.DataFrame({
+            '特征': [trans.get(f, f) for f in feature_names_model], # 转中文
+            '重要性': importances
+        }).sort_values(by='重要性', ascending=True) # 从小到大排，画图时大的在上面
+        
+        # 使用 Streamlit 的 bar_chart
+        st.bar_chart(df_imp, x='特征', y='重要性', color="#28a745", horizontal=True)
+        
+        # 找出最重要的前两个特征
+        top_2 = df_imp.iloc[-2:]['特征'].tolist()[::-1]
+        st.info(f"💡 **工程建议**：从全局来看，影响封头屈曲载荷最关键的两个参数是 **{top_2[0]}** 和 **{top_2[1]}**。在实际制造和缺陷控制中，应优先严格把控这两个指标的加工公差。")
