@@ -3,11 +3,11 @@ import pandas as pd
 import numpy as np
 import io
 import joblib
-import altair as alt  # 💡 修复1：补充 Altair 库
+import altair as alt
 from datap import Data
 
 # ==========================================
-# 0. 准备模型和特征 (使用缓存避免重复加载)
+# 0. 准备模型和特征
 # ==========================================
 st.set_page_config(page_title="屈曲载荷预测系统", page_icon="🛡️", layout="wide")
 
@@ -52,19 +52,9 @@ def predict(input_df):
     df_processed = dt.good_dfs[0]
     df_processed = df_processed[model.feature_names_in_].copy()
     
-    # ==============================================================
-    # 💡 核心修复：加入特征边界校验（这里以 t/d 为例，你需要根据训练集实际情况修改数值）
-    # 假设你的训练集里，t/d 的范围是 0.001 到 0.02
-    # ==============================================================
-    current_td = df_processed['t/d'].values[0] # 假设处理后的列名包含 t/d
-    
-    if current_td < 0.0005 or current_td > 0.05:
-        # 这里可以抛出一个特定的错误，让前端去捕获
-        raise ValueError("输入的厚度与直径比严重偏离模型训练样本的物理范围，预测结果不可靠！")
-    # ==============================================================
-
-    # 2. 如果通过校验，正常预测
-    return model.predict(df_processed))
+    # 2. 边界校验 (去掉了写死的硬编码，如果你有明确的全局边界可以加在这里)
+    # 只要 translate 不报错，直接预测
+    return model.predict(df_processed) # 💡 修复：去掉了多余的右括号
 
 # ==========================================
 # 1. 侧边栏导航
@@ -104,6 +94,7 @@ elif page == "单次参数预测":
             
             for i, name in enumerate(raw_features):
                 with col_a if i % 2 == 0 else col_b:
+                    # 对于 top 和 crown，允许输入负数，不需要 min_value 限制
                     input_values[name] = st.number_input(
                         label=f"{trans[name]}:",
                         value=float(default[name]),
@@ -227,8 +218,15 @@ elif page == "敏感性分析（测试）":
             )
             
             st.write("设置扫描范围：")
-            default_min = 0.0
-            default_max = float(default.get(target_feature, 10.0)) * 3 + 10.0
+            
+            # 💡 修复核心：如果分析的是 top 或 crown，默认范围应该包含负数
+            if target_feature in ['top', 'crown']:
+                default_min = -20.0
+                default_max = 0.0
+            else:
+                default_min = 0.0
+                default_max = float(default.get(target_feature, 10.0)) * 3 + 10.0
+                
             min_val = st.number_input("最小值", value=default_min, step=0.1)
             max_val = st.number_input("最大值", value=max(default_max, min_val + 1.0), step=0.1)
             steps = st.slider("采样点数", min_value=1, max_value=100, value=50, step=5)
@@ -266,8 +264,6 @@ elif page == "敏感性分析（测试）":
                     '预测屈曲载荷 (MPa)': y_vals
                 })
                 
-                # 💡 修复3 & 4：清理图表冗余，只保留真实的散点+折线
-                # 散点（体现真实预测）
                 points = alt.Chart(df_result).mark_circle(
                     size=80, 
                     color='#007bff', 
@@ -280,14 +276,13 @@ elif page == "敏感性分析（测试）":
                     tooltip=[trans.get(target_feature, target_feature), '预测屈曲载荷 (MPa)']
                 )
                 
-                # 折线（连接真实的预测点）
                 line = alt.Chart(df_result).mark_line(
                     color='#00bcd4', 
                     strokeWidth=3,
                     opacity=0.7
                 ).encode(
                     x=trans.get(target_feature, target_feature),
-                    y='预测屈曲载荷 (MPa)' # 💡 修复：对齐列名
+                    y='预测屈曲载荷 (MPa)'
                 )
                 
                 st.altair_chart((line + points).interactive(), use_container_width=True)
@@ -313,17 +308,12 @@ elif page == "敏感性分析（测试）":
             '重要性': importances
         }).sort_values(by='重要性', ascending=True) 
         
-        # 使用 Altair 绘制横向柱状图（支持长文字完整显示）
-        # 💡 关键：axis=alt.Axis(labelLimit=400) 允许标签最长达到 400 像素，不再被截断
         chart = alt.Chart(df_imp).mark_bar(color='#28a745').encode(
             x=alt.X('重要性:Q', title='重要性得分'),
             y=alt.Y('特征:N', sort='-x', title=None, axis=alt.Axis(labelLimit=400)),
             tooltip=['特征', '重要性']
         ).properties(
-            height=400 # 设置图表高度，让柱子不要太挤
+            height=400 
         )
         
-        # 使用 Streamlit 渲染图表
         st.altair_chart(chart, use_container_width=True)
-        
-
