@@ -230,7 +230,7 @@ elif page == "敏感性分析（测试）":
     st.title("📊 缺陷参数敏感性分析")
     st.markdown("""
     **基于离散样本的保守响应**
-    由于使用基于决策树的模型，曲线会呈现阶梯状，结论仅供参考
+    由于使用基于决策树的模型，取点密集时，曲线会呈现阶梯状，结论仅供参考
     """)
     
     tab1, tab2 = st.tabs(["📈 单变量敏感性曲线 (定量)", "🏆 全局特征重要性 (定性)"])
@@ -282,9 +282,6 @@ elif page == "敏感性分析（测试）":
                 if target_feature in ['top', 'crown', 't', 'knuckle', 'smax']:
                     limit_min *= base_d
                     limit_max *= base_d
-            else:
-                # 直径等物理特征兜底
-                limit_min, limit_max = 1000.0, 8000.0
 
             limit_min = float(limit_min)
             limit_max = float(limit_max)
@@ -295,7 +292,7 @@ elif page == "敏感性分析（测试）":
             min_val = st.number_input("最小值", min_value=limit_min, max_value=limit_max, value=limit_min, step=0.1)
             max_val = st.number_input("最大值", min_value=min_val + 0.01, max_value=limit_max, value=limit_max, step=0.1)
             
-            steps = st.slider("采样点数", min_value=5, max_value=50, value=20, step=5)
+            steps = st.slider("采样点数", min_value=5, max_value=50, value=5, step=1)
 
         with col_chart:
             st.markdown(f"### 📈 {trans.get(target_feature, target_feature)} 对屈曲载荷的影响")
