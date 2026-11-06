@@ -192,8 +192,8 @@ elif page == "批量 Excel 预测":
 elif page == "敏感性分析":
     st.title("📊 缺陷参数敏感性分析")
     st.markdown("""
-    本章节通过调用模型进行“虚拟实验”，分析当单一缺陷参数变化时，对封头屈曲载荷的影响规律。
-    **无需重新进行耗时的有限元仿真，即可快速评估缺陷敏感度。**
+    **本模块尝试分析缺陷参数敏感性**
+    由于使用基于决策树的模型，曲线会呈现阶梯状，仅供参考
     """)
     
     tab1, tab2 = st.tabs(["📈 单变量敏感性曲线 (定量)", "🏆 全局特征重要性 (定性)"])
@@ -218,7 +218,7 @@ elif page == "敏感性分析":
             default_max = float(default.get(target_feature, 10.0)) * 3 + 10.0
             min_val = st.number_input("最小值", value=default_min, step=0.1)
             max_val = st.number_input("最大值", value=max(default_max, min_val + 1.0), step=0.1)
-            steps = st.slider("采样点数 (建议 15-30 之间)", min_value=10, max_value=50, value=20, step=5)
+            steps = st.slider("采样点数", min_value=1, max_value=100, value=50, step=5)
             
             st.markdown("---")
             st.markdown("### 📌 其他基准参数")
@@ -280,7 +280,7 @@ elif page == "敏感性分析":
                 st.altair_chart((line + points).interactive(), use_container_width=True)
                 
                 st.success(f"""
-                **规律洞察**：随着【{trans.get(target_feature, target_feature)}】从 {min_val} 增加到 {max_val}，
+                随着【{trans.get(target_feature, target_feature)}】从 {min_val} 增加到 {max_val}，
                 屈曲载荷从 **{y_vals[0]:.4f} MPa** 变化到了 **{y_vals[-1]:.4f} MPa**。
                 整体变化斜率为 {(y_vals[-1] - y_vals[0]) / (max_val - min_val):.4f} MPa/单位。
                 """)
