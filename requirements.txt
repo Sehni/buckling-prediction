@@ -4,5 +4,3 @@ scikit-learn
 joblib
 openpyxl
 numpy
-optuna
-xgboost
