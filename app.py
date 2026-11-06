@@ -43,18 +43,49 @@ trans = {
 }
 default = data.default
 
+# ==========================================
+# 💡 将校验边界提为全局变量，供校验和敏感性分析共同使用
+# ==========================================
+CHECK_BOUNDS = {
+    'top/d': (-0.0064, 0.0), 
+    'crown/d': (-0.0064, 0.0), 
+    'fai': (17.0, 30.0), 
+    'material': (205.0, 415.0), 
+    'd/2h': (1.728, 2.25), 
+    't/d': (0.0005, 0.0012), 
+    'knuckle/d': (0.0, 0.0125), 
+    'xita': (0.0, 15.0), 
+    'smax/d': (0.0, 0.016)
+}
+CHECK_TRANS = {
+    'top/d': '顶点内凹与直径比', 'crown/d': '球冠区最大内凹与直径比', 
+    'fai': '过渡区外凸范围', 'material': '材料屈服强度', 
+    'd/2h': '径高比', 't/d': '壁厚与直径比', 
+    'knuckle/d': '过渡区整体缺陷最大外凸与直径比', 
+    'xita': '过渡区局部缺陷环向范围', 'smax/d': '局部缺陷最大外凸与直径比'
+}
+
+def check(df_processed):
+    for col, (min_v, max_v) in CHECK_BOUNDS.items():
+        if col in df_processed.columns:
+            # 支持批量校验，只要有一行越界就报错
+            if ((df_processed[col] < min_v) | (df_processed[col] > max_v)).any():
+                raise ValueError(f"输入偏离常识：【{CHECK_TRANS[col]}】应在 {min_v} 到 {max_v} 之间。预测已阻断！")
+
 def predict(input_df):
     dt = Data()
     input_df['buckling'] = 0 
     
-    # 1. 进行无量纲转换
+    # 1. 无量纲转换
     dt.translate(input_df)
     df_processed = dt.good_dfs[0]
     df_processed = df_processed[model.feature_names_in_].copy()
     
-    # 2. 边界校验 (去掉了写死的硬编码，如果你有明确的全局边界可以加在这里)
-    # 只要 translate 不报错，直接预测
-    return model.predict(df_processed) # 💡 修复：去掉了多余的右括号
+    # 2. 边界校验
+    check(df_processed)
+    
+    # 3. 预测
+    return model.predict(df_processed)
 
 # ==========================================
 # 1. 侧边栏导航
@@ -94,7 +125,6 @@ elif page == "单次参数预测":
             
             for i, name in enumerate(raw_features):
                 with col_a if i % 2 == 0 else col_b:
-                    # 对于 top 和 crown，允许输入负数，不需要 min_value 限制
                     input_values[name] = st.number_input(
                         label=f"{trans[name]}:",
                         value=float(default[name]),
@@ -202,7 +232,6 @@ elif page == "敏感性分析（测试）":
     
     tab1, tab2 = st.tabs(["📈 单变量敏感性曲线 (定量)", "🏆 全局特征重要性 (定性)"])
     
-    # --- Tab 1: 单变量敏感性曲线 ---
     with tab1:
         col_ctrl, col_chart = st.columns([1, 2.5])
         
@@ -217,24 +246,11 @@ elif page == "敏感性分析（测试）":
                 index=raw_features.index('top') if 'top' in raw_features else 0
             )
             
-            st.write("设置扫描范围：")
-            
-            # 💡 修复核心：如果分析的是 top 或 crown，默认范围应该包含负数
-            if target_feature in ['top', 'crown']:
-                default_min = -20.0
-                default_max = 0.0
-            else:
-                default_min = 0.0
-                default_max = float(default.get(target_feature, 10.0)) * 3 + 10.0
-                
-            min_val = st.number_input("最小值", value=default_min, step=0.1)
-            max_val = st.number_input("最大值", value=max(default_max, min_val + 1.0), step=0.1)
-            steps = st.slider("采样点数", min_value=1, max_value=100, value=50, step=5)
-            
             st.markdown("---")
             st.markdown("### 📌 其他基准参数")
             st.caption("其他参数保持默认值或在此微调：")
             
+            # 💡 将基准参数提前，以便后续计算动态边界
             base_values = {}
             with st.expander("展开修改基准参数"):
                 for f in raw_features:
@@ -242,6 +258,39 @@ elif page == "敏感性分析（测试）":
                         base_values[f] = st.number_input(f"{trans.get(f, f)}", value=float(default.get(f, 0)), step=0.1)
             if not base_values:
                 base_values = {f: default.get(f, 0) for f in raw_features if f != target_feature}
+
+            st.markdown("---")
+            st.write("设置扫描范围：")
+            
+            # 💡 核心修复：动态计算扫描范围
+            base_d = base_values.get('d', default.get('d', 5000))
+            feature_to_bound_key = {
+                'top': 'top/d', 'crown': 'crown/d', 't': 't/d',
+                'knuckle': 'knuckle/d', 'smax': 'smax/d',
+                'material': 'material', 'd/2h': 'd/2h', 'fai': 'fai', 'xita': 'xita'
+            }
+
+            if target_feature in ['top', 'crown', 't', 'knuckle', 'smax']:
+                # 无量纲参数乘以直径，反推物理范围（mm）
+                b_key = feature_to_bound_key[target_feature]
+                default_min = float(CHECK_BOUNDS[b_key][0] * base_d)
+                default_max = float(CHECK_BOUNDS[b_key][1] * base_d)
+                if default_min == default_max:
+                    default_min -= 5.0
+            elif target_feature in CHECK_BOUNDS:
+                # 已经是物理参数，直接用校验边界
+                default_min = float(CHECK_BOUNDS[target_feature][0])
+                default_max = float(CHECK_BOUNDS[target_feature][1])
+            else:
+                # 兜底（例如扫描 d 本身）
+                default_min = 1000.0
+                default_max = 8000.0
+                
+            min_val = st.number_input("最小值", value=default_min, step=0.1)
+            max_val = st.number_input("最大值", value=max(default_max, min_val + 1.0), step=0.1)
+            
+            # 💡 调小默认采样点数，让阶梯特征更明显
+            steps = st.slider("采样点数 (建议 15-30，过多会导致阶梯看不清)", min_value=5, max_value=50, value=20, step=5)
 
         with col_chart:
             st.markdown(f"### 📈 {trans.get(target_feature, target_feature)} 对屈曲载荷的影响")
@@ -265,11 +314,7 @@ elif page == "敏感性分析（测试）":
                 })
                 
                 points = alt.Chart(df_result).mark_circle(
-                    size=80, 
-                    color='#007bff', 
-                    opacity=0.8,
-                    stroke='white',
-                    strokeWidth=1.5
+                    size=80, color='#007bff', opacity=0.8, stroke='white', strokeWidth=1.5
                 ).encode(
                     x=alt.X(trans.get(target_feature, target_feature), title=trans.get(target_feature, target_feature), scale=alt.Scale(zero=False)),
                     y=alt.Y('预测屈曲载荷 (MPa)', title='屈曲载荷 (MPa)', scale=alt.Scale(zero=False)),
@@ -277,9 +322,7 @@ elif page == "敏感性分析（测试）":
                 )
                 
                 line = alt.Chart(df_result).mark_line(
-                    color='#00bcd4', 
-                    strokeWidth=3,
-                    opacity=0.7
+                    color='#00bcd4', strokeWidth=3, opacity=0.7
                 ).encode(
                     x=trans.get(target_feature, target_feature),
                     y='预测屈曲载荷 (MPa)'
@@ -290,12 +333,10 @@ elif page == "敏感性分析（测试）":
                 st.success(f"""
                 随着【{trans.get(target_feature, target_feature)}】从 {min_val} 增加到 {max_val}，
                 屈曲载荷从 **{y_vals[0]:.4f} MPa** 变化到了 **{y_vals[-1]:.4f} MPa**。
-                整体变化斜率为 {(y_vals[-1] - y_vals[0]) / (max_val - min_val):.4f} MPa/单位。
                 """)
             except Exception as e:
                 st.error(f"计算出错: {e}")
 
-    # --- Tab 2: 全局特征重要性 ---
     with tab2:
         st.markdown("### 全局特征重要性排名")
         st.markdown("基于模型内部评估机制，反映所有特征对屈曲载荷的整体影响权重。")
@@ -312,8 +353,6 @@ elif page == "敏感性分析（测试）":
             x=alt.X('重要性:Q', title='重要性得分'),
             y=alt.Y('特征:N', sort='-x', title=None, axis=alt.Axis(labelLimit=400)),
             tooltip=['特征', '重要性']
-        ).properties(
-            height=400 
-        )
+        ).properties(height=400)
         
         st.altair_chart(chart, use_container_width=True)
