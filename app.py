@@ -245,7 +245,7 @@ elif page == "敏感性分析（测试）":
             
             target_feature = st.selectbox(
                 "选择要分析的参数", 
-                options=raw_features,
+                options=raw_features.remove('d'),
                 format_func=lambda x: trans.get(x, x), 
                 index=raw_features.index('top') if 'top' in raw_features else 0
             )
