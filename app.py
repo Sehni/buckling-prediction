@@ -45,13 +45,26 @@ default = data.default
 
 def predict(input_df):
     dt = Data()
-    input_df['buckling'] = 0  
-    dt.translate(input_df)
+    input_df['buckling'] = 0 
     
+    # 1. 进行无量纲转换
+    dt.translate(input_df)
     df_processed = dt.good_dfs[0]
     df_processed = df_processed[model.feature_names_in_].copy()
     
-    return model.predict(df_processed)
+    # ==============================================================
+    # 💡 核心修复：加入特征边界校验（这里以 t/d 为例，你需要根据训练集实际情况修改数值）
+    # 假设你的训练集里，t/d 的范围是 0.001 到 0.02
+    # ==============================================================
+    current_td = df_processed['t/d'].values[0] # 假设处理后的列名包含 t/d
+    
+    if current_td < 0.0005 or current_td > 0.05:
+        # 这里可以抛出一个特定的错误，让前端去捕获
+        raise ValueError("输入的厚度与直径比严重偏离模型训练样本的物理范围，预测结果不可靠！")
+    # ==============================================================
+
+    # 2. 如果通过校验，正常预测
+    return model.predict(df_processed))
 
 # ==========================================
 # 1. 侧边栏导航
