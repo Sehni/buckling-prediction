@@ -313,6 +313,4 @@ elif page == "敏感性分析":
         # 使用 Streamlit 渲染图表
         st.altair_chart(chart, use_container_width=True)
         
-        if len(df_imp) >= 2:
-            top_2 = df_imp.iloc[-2:]['特征'].tolist()[::-1]
-            st.info(f"💡 **工程建议**：从全局来看，影响封头屈曲载荷最关键的两个参数是 **{top_2[0]}** 和 **{top_2[1]}**。在实际制造和缺陷控制中，应优先严格把控这两个指标的加工公差。")
+
