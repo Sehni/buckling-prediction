@@ -13,6 +13,7 @@ st.set_page_config(page_title="屈曲载荷预测系统", page_icon="🛡️", l
 
 @st.cache_resource
 def load_assets():
+    # 确保这里的模型文件名与你的 GitHub 仓库一致
     model = joblib.load('best_model_xgb.pkl')
     data = Data()
     return model, data
@@ -44,7 +45,7 @@ trans = {
 default = data.default
 
 # ==========================================
-# 💡 将校验边界提为全局变量，供校验和敏感性分析共同使用
+# 💡 全局配置：校验边界与名称映射
 # ==========================================
 CHECK_BOUNDS = {
     'top/d': (-0.0064, 0.0), 
@@ -66,9 +67,10 @@ CHECK_TRANS = {
 }
 
 def check(df_processed):
+    """校验输入数据是否严重偏离训练集物理边界"""
     for col, (min_v, max_v) in CHECK_BOUNDS.items():
         if col in df_processed.columns:
-            # 支持批量校验，只要有一行越界就报错
+            # 兼容单次与批量预测，只要有一行越界就报错
             if ((df_processed[col] < min_v) | (df_processed[col] > max_v)).any():
                 raise ValueError(f"输入偏离常识：【{CHECK_TRANS[col]}】应在 {min_v} 到 {max_v} 之间。预测已阻断！")
 
@@ -76,7 +78,7 @@ def predict(input_df):
     dt = Data()
     input_df['buckling'] = 0 
     
-    # 1. 无量纲转换
+    # 1. 进行无量纲转换
     dt.translate(input_df)
     df_processed = dt.good_dfs[0]
     df_processed = df_processed[model.feature_names_in_].copy()
@@ -84,7 +86,7 @@ def predict(input_df):
     # 2. 边界校验
     check(df_processed)
     
-    # 3. 预测
+    # 3. 返回预测结果
     return model.predict(df_processed)
 
 # ==========================================
@@ -125,6 +127,7 @@ elif page == "单次参数预测":
             
             for i, name in enumerate(raw_features):
                 with col_a if i % 2 == 0 else col_b:
+                    # 不加 min_value 限制，允许输入 top 和 crown 的负数
                     input_values[name] = st.number_input(
                         label=f"{trans[name]}:",
                         value=float(default[name]),
@@ -232,6 +235,7 @@ elif page == "敏感性分析（测试）":
     
     tab1, tab2 = st.tabs(["📈 单变量敏感性曲线 (定量)", "🏆 全局特征重要性 (定性)"])
     
+    # --- Tab 1: 单变量敏感性曲线 ---
     with tab1:
         col_ctrl, col_chart = st.columns([1, 2.5])
         
@@ -250,7 +254,6 @@ elif page == "敏感性分析（测试）":
             st.markdown("### 📌 其他基准参数")
             st.caption("其他参数保持默认值或在此微调：")
             
-            # 💡 将基准参数提前，以便后续计算动态边界
             base_values = {}
             with st.expander("展开修改基准参数"):
                 for f in raw_features:
@@ -262,34 +265,36 @@ elif page == "敏感性分析（测试）":
             st.markdown("---")
             st.write("设置扫描范围：")
             
-            # 💡 核心修复：动态计算扫描范围
+            # 💡 核心复用：从 CHECK_BOUNDS 动态获取扫描范围
             base_d = base_values.get('d', default.get('d', 5000))
             feature_to_bound_key = {
                 'top': 'top/d', 'crown': 'crown/d', 't': 't/d',
                 'knuckle': 'knuckle/d', 'smax': 'smax/d',
                 'material': 'material', 'd/2h': 'd/2h', 'fai': 'fai', 'xita': 'xita'
             }
-
-            if target_feature in ['top', 'crown', 't', 'knuckle', 'smax']:
-                # 无量纲参数乘以直径，反推物理范围（mm）
-                b_key = feature_to_bound_key[target_feature]
-                default_min = float(CHECK_BOUNDS[b_key][0] * base_d)
-                default_max = float(CHECK_BOUNDS[b_key][1] * base_d)
-                if default_min == default_max:
-                    default_min -= 5.0
-            elif target_feature in CHECK_BOUNDS:
-                # 已经是物理参数，直接用校验边界
-                default_min = float(CHECK_BOUNDS[target_feature][0])
-                default_max = float(CHECK_BOUNDS[target_feature][1])
-            else:
-                # 兜底（例如扫描 d 本身）
-                default_min = 1000.0
-                default_max = 8000.0
-                
-            min_val = st.number_input("最小值", value=default_min, step=0.1)
-            max_val = st.number_input("最大值", value=max(default_max, min_val + 1.0), step=0.1)
+            b_key = feature_to_bound_key.get(target_feature)
             
-            # 💡 调小默认采样点数，让阶梯特征更明显
+            if b_key and b_key in CHECK_BOUNDS:
+                limit_min = float(CHECK_BOUNDS[b_key][0])
+                limit_max = float(CHECK_BOUNDS[b_key][1])
+                
+                # 无量纲特征反推回真实物理尺寸 (mm)
+                if target_feature in ['top', 'crown', 't', 'knuckle', 'smax']:
+                    limit_min *= base_d
+                    limit_max *= base_d
+            else:
+                # 直径等物理特征兜底
+                limit_min, limit_max = 1000.0, 8000.0
+
+            limit_min = float(limit_min)
+            limit_max = float(limit_max)
+            if limit_max <= limit_min:
+                limit_max = limit_min + 0.1
+
+            # UI硬性锁死，用户无法越界
+            min_val = st.number_input("最小值", min_value=limit_min, max_value=limit_max, value=limit_min, step=0.1)
+            max_val = st.number_input("最大值", min_value=min_val + 0.01, max_value=limit_max, value=limit_max, step=0.1)
+            
             steps = st.slider("采样点数 (建议 15-30，过多会导致阶梯看不清)", min_value=5, max_value=50, value=20, step=5)
 
         with col_chart:
@@ -337,6 +342,7 @@ elif page == "敏感性分析（测试）":
             except Exception as e:
                 st.error(f"计算出错: {e}")
 
+    # --- Tab 2: 全局特征重要性 ---
     with tab2:
         st.markdown("### 全局特征重要性排名")
         st.markdown("基于模型内部评估机制，反映所有特征对屈曲载荷的整体影响权重。")
