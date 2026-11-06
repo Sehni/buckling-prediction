@@ -200,7 +200,7 @@ elif page == "敏感性分析":
     
     # --- Tab 1: 单变量敏感性曲线 ---
     with tab1:
-        col_ctrl, col_chart = st.columns([1, 2])
+        col_ctrl, col_chart = st.columns([1, 2.5])
         
         with col_ctrl:
             st.markdown("### ⚙️ 实验设置")
@@ -300,7 +300,18 @@ elif page == "敏感性分析":
             '重要性': importances
         }).sort_values(by='重要性', ascending=True) 
         
-        st.bar_chart(df_imp, x='特征', y='重要性', color="#28a745", horizontal=True)
+        # 使用 Altair 绘制横向柱状图（支持长文字完整显示）
+        # 💡 关键：axis=alt.Axis(labelLimit=400) 允许标签最长达到 400 像素，不再被截断
+        chart = alt.Chart(df_imp).mark_bar(color='#28a745').encode(
+            x=alt.X('重要性:Q', title='重要性得分'),
+            y=alt.Y('特征:N', sort='-x', title=None, axis=alt.Axis(labelLimit=400)),
+            tooltip=['特征', '重要性']
+        ).properties(
+            height=400 # 设置图表高度，让柱子不要太挤
+        )
+        
+        # 使用 Streamlit 渲染图表
+        st.altair_chart(chart, use_container_width=True)
         
         if len(df_imp) >= 2:
             top_2 = df_imp.iloc[-2:]['特征'].tolist()[::-1]
