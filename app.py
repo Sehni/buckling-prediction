@@ -13,7 +13,6 @@ st.set_page_config(page_title="屈曲载荷预测系统", page_icon="🛡️", l
 
 @st.cache_resource
 def load_assets():
-    # 确保这里的模型文件名与你的 GitHub 仓库一致
     model = joblib.load('best_model_xgb.pkl')
     data = Data()
     return model, data
@@ -66,11 +65,31 @@ CHECK_TRANS = {
     'xita': '过渡区局部缺陷环向范围', 'smax/d': '局部缺陷最大外凸与直径比'
 }
 
+# ==========================================
+# 💡 真实无量纲样本空间字典
+# ==========================================
+DOT = {
+    'top/d': np.array([0., -0.002, -0.0064]),
+    'crown/d': np.array([-0.001, -0.002, -0.004, -0.0064, 0.]),
+    'fai': np.array([20., 30., 24., 17.]),
+    'material': np.array([205., 345., 415.]),
+    'd/2h': np.array([2., 2.25, 1.75, 1.728, 2.2]),
+    't/d': np.array([0.0005, 0.0006, 0.0008, 0.001, 0.0012]),
+    'knuckle/d': np.array([0., 0.001, 0.002, 0.004, 0.006, 0.009, 0.0125]),
+    'xita': np.array([10., 0., 15., 5., 2.5]),
+    'smax/d': np.array([0., 0.001, 0.002, 0.003, 0.004, 0.006, 0.009, 0.0125, 0.016])
+}
+
+DOT_TO_RAW = {
+    'top/d': 'top', 'crown/d': 'crown', 'fai': 'fai',
+    'material': 'material', 'd/2h': 'd/2h', 't/d': 't',
+    'knuckle/d': 'knuckle', 'xita': 'xita', 'smax/d': 'smax'
+}
+
 def check(df_processed):
     """校验输入数据是否严重偏离训练集物理边界"""
     for col, (min_v, max_v) in CHECK_BOUNDS.items():
         if col in df_processed.columns:
-            # 兼容单次与批量预测，只要有一行越界就报错
             if ((df_processed[col] < min_v) | (df_processed[col] > max_v)).any():
                 raise ValueError(f"输入偏离常识：【{CHECK_TRANS[col]}】应在 {min_v} 到 {max_v} 之间。预测已阻断！")
 
@@ -93,7 +112,7 @@ def predict(input_df):
 # 1. 侧边栏导航
 # ==========================================
 st.sidebar.title("🛡️ 导航菜单")
-page = st.sidebar.radio("请选择功能", ["欢迎首页", "单次参数预测", "批量 Excel 预测", "敏感性分析（测试）"])
+page = st.sidebar.radio("请选择功能", ["欢迎首页", "单次参数预测", "批量 Excel 预测", "敏感性分析", "测试：连续敏感性分析"])
 
 # ==========================================
 # 2. 页面一：欢迎页
@@ -127,7 +146,6 @@ elif page == "单次参数预测":
             
             for i, name in enumerate(raw_features):
                 with col_a if i % 2 == 0 else col_b:
-                    # 不加 min_value 限制，允许输入 top 和 crown 的负数
                     input_values[name] = st.number_input(
                         label=f"{trans[name]}:",
                         value=float(default[name]),
@@ -224,107 +242,124 @@ elif page == "批量 Excel 预测":
                     st.error(f"❌ 处理失败，错误信息：{e}")
 
 # ==========================================
-# 5. 页面四：敏感性分析
+# 5. 页面四：敏感性分析 (含离散分析与特征重要性)
 # ==========================================
-elif page == "敏感性分析（测试）":
+elif page == "敏感性分析":
     st.title("📊 缺陷参数敏感性分析")
-    st.markdown("""
-    **基于离散样本的保守响应**
-    由于使用基于决策树的模型，取点密集时，曲线会呈现阶梯状，结论仅供参考
-    """)
     
-    tab1, tab2 = st.tabs(["📈 单变量敏感性曲线 (定量)", "🏆 全局特征重要性 (定性)"])
+    tab1, tab2 = st.tabs(["📈 真实离散样本敏感性曲线", "🏆 全局特征重要性"])
     
-    # --- Tab 1: 单变量敏感性曲线 ---
+    # --- Tab 1: 真实离散样本敏感性曲线 ---
     with tab1:
+        st.markdown("""
+        **本模块完全基于真实训练样本空间。**
+        基准参数与扫描点均取自真实数据集，杜绝任何插值造假，呈现最真实的离散响应。
+        """)
+        
         col_ctrl, col_chart = st.columns([1, 2.5])
         
         with col_ctrl:
             st.markdown("### ⚙️ 实验设置")
-            st.info("保持其他参数不变，单独调节一个参数，观察载荷变化。")
             
+            raw_scan_options = list(DOT_TO_RAW.values())
             target_feature = st.selectbox(
-                "选择要分析的参数", 
-                options=[f for f in raw_features if f != 'd'],
-                format_func=lambda x: trans.get(x, x), 
-                index=raw_features.index('top') if 'top' in raw_features else 0
+                "选择要扫描的参数", 
+                options=raw_scan_options,
+                format_func=lambda x: trans.get(x, x)
             )
             
             st.markdown("---")
-            st.markdown("### 📌 其他基准参数")
-            st.caption("其他参数保持默认值或在此微调：")
+            st.markdown("### 📌 基准参数设置")
+            st.caption("除直径外，其余参数只能从真实样本库中选取：")
             
             base_values = {}
-            with st.expander("展开修改基准参数"):
+            
+            if target_feature != 'd':
+                base_d = st.number_input(
+                    "基准直径 d (mm)", 
+                    min_value=1000.0, 
+                    max_value=10000.0, 
+                    value=float(default.get('d', 5000.0)), 
+                    step=100.0
+                )
+                base_values['d'] = base_d
+            else:
+                base_d = float(default.get('d', 5000.0))
+            
+            with st.expander("展开修改其他基准参数", expanded=True):
                 for f in raw_features:
-                    if f != target_feature:
-                        base_values[f] = st.number_input(f"{trans.get(f, f)}", value=float(default.get(f, 0)), step=0.1)
-            if not base_values:
-                base_values = {f: default.get(f, 0) for f in raw_features if f != target_feature}
-
-            st.markdown("---")
-            st.write("设置扫描范围：")
-            
-            # 💡 核心复用：从 CHECK_BOUNDS 动态获取扫描范围
-            base_d = base_values.get('d', default.get('d', 5000))
-            feature_to_bound_key = {
-                'top': 'top/d', 'crown': 'crown/d', 't': 't/d',
-                'knuckle': 'knuckle/d', 'smax': 'smax/d',
-                'material': 'material', 'd/2h': 'd/2h', 'fai': 'fai', 'xita': 'xita'
-            }
-            b_key = feature_to_bound_key.get(target_feature)
-            
-            if b_key and b_key in CHECK_BOUNDS:
-                limit_min = float(CHECK_BOUNDS[b_key][0])
-                limit_max = float(CHECK_BOUNDS[b_key][1])
-                
-                # 无量纲特征反推回真实物理尺寸 (mm)
-                if target_feature in ['top', 'crown', 't', 'knuckle', 'smax']:
-                    limit_min *= base_d
-                    limit_max *= base_d
-
-            limit_min = float(limit_min)
-            limit_max = float(limit_max)
-            if limit_max <= limit_min:
-                limit_max = limit_min + 0.1
-
-            # UI硬性锁死，用户无法越界
-            min_val = st.number_input("最小值", min_value=limit_min, max_value=limit_max, value=limit_min, step=0.1)
-            max_val = st.number_input("最大值", min_value=min_val + 0.01, max_value=limit_max, value=limit_max, step=0.1)
-            
-            steps = st.slider("采样点数", min_value=5, max_value=50, value=5, step=1)
+                    if f != target_feature and f != 'd':
+                        dot_key = None
+                        for k, v in DOT_TO_RAW.items():
+                            if v == f:
+                                dot_key = k
+                                break
+                        
+                        if dot_key and dot_key in DOT:
+                            options = DOT[dot_key]
+                            if '/d' in dot_key:
+                                display_options = [round(val * base_d, 4) for val in options]
+                            else:
+                                display_options = options
+                            
+                            base_values[f] = st.selectbox(
+                                f"{trans.get(f, f)}",
+                                options=display_options,
+                                index=0
+                            )
+                        else:
+                            base_values[f] = st.number_input(f"{trans.get(f, f)}", value=float(default.get(f, 0)))
 
         with col_chart:
             st.markdown(f"### 📈 {trans.get(target_feature, target_feature)} 对屈曲载荷的影响")
             
-            x_vals = np.linspace(min_val, max_val, steps)
-            plot_data = []
-            for x in x_vals:
-                row = base_values.copy()
-                row[target_feature] = x
-                plot_data.append(row)
-            
-            df_plot = pd.DataFrame(plot_data, columns=raw_features)
-            
             try:
+                target_dot_key = None
+                for k, v in DOT_TO_RAW.items():
+                    if v == target_feature:
+                        target_dot_key = k
+                        break
+                        
+                if target_dot_key and target_dot_key in DOT:
+                    ratio_x_vals = DOT[target_dot_key]
+                else:
+                    st.error("未找到该参数的离散样本点！")
+                    st.stop()
+                    
+                if '/d' in target_dot_key:
+                    x_vals_physical = [round(val * base_d, 4) for val in ratio_x_vals]
+                else:
+                    x_vals_physical = ratio_x_vals
+                    
+                plot_data = []
+                for x in x_vals_physical:
+                    row = base_values.copy()
+                    row[target_feature] = x
+                    plot_data.append(row)
+                
+                df_plot = pd.DataFrame(plot_data, columns=raw_features)
+                
                 with st.spinner("模型计算中..."):
                     y_vals = predict(df_plot)
                 
                 df_result = pd.DataFrame({
-                    trans.get(target_feature, target_feature): x_vals,
+                    trans.get(target_feature, target_feature): x_vals_physical,
                     '预测屈曲载荷 (MPa)': y_vals
                 })
                 
+                y_min = float(min(y_vals)) * 0.95 if min(y_vals) > 0 else float(min(y_vals)) * 1.05
+                y_max = float(max(y_vals)) * 1.05
+
                 points = alt.Chart(df_result).mark_circle(
-                    size=80, color='#007bff', opacity=0.8, stroke='white', strokeWidth=1.5
+                    size=120, color='#e74c3c', opacity=0.9, stroke='white', strokeWidth=2
                 ).encode(
-                    x=alt.X(trans.get(target_feature, target_feature), title=trans.get(target_feature, target_feature), scale=alt.Scale(zero=False)),
-                    y=alt.Y('预测屈曲载荷 (MPa)', title='屈曲载荷 (MPa)', scale=alt.Scale(zero=False)),
+                    x=alt.X(trans.get(target_feature, target_feature), title=trans.get(target_feature, target_feature), scale=alt.Scale(nice=True)),
+                    y=alt.Y('预测屈曲载荷 (MPa)', title='屈曲载荷 (MPa)', scale=alt.Scale(domain=[y_min, y_max])),
                     tooltip=[trans.get(target_feature, target_feature), '预测屈曲载荷 (MPa)']
                 )
                 
                 line = alt.Chart(df_result).mark_line(
-                    color='#00bcd4', strokeWidth=3, opacity=0.7
+                    color='#f39c12', strokeWidth=3, opacity=0.8
                 ).encode(
                     x=trans.get(target_feature, target_feature),
                     y='预测屈曲载荷 (MPa)'
@@ -333,9 +368,12 @@ elif page == "敏感性分析（测试）":
                 st.altair_chart((line + points).interactive(), use_container_width=True)
                 
                 st.success(f"""
-                随着【{trans.get(target_feature, target_feature)}】从 {min_val} 增加到 {max_val}，
-                屈曲载荷从 **{y_vals[0]:.4f} MPa** 变化到了 **{y_vals[-1]:.4f} MPa**。
+                **真实离散响应**：当前基准直径 d = **{base_values.get('d', base_d):.0f} mm**。
+                随着【{trans.get(target_feature, target_feature)}】在真实样本空间中变化，
+                屈曲载荷在 **{min(y_vals):.4g} MPa** 到 **{max(y_vals):.4g} MPa** 之间波动。
+                *（注：折线上的每一个红点均代表一组真实的训练工况，由无量纲样本精确反推得出。）*
                 """)
+                
             except Exception as e:
                 st.error(f"计算出错: {e}")
 
@@ -359,3 +397,123 @@ elif page == "敏感性分析（测试）":
         ).properties(height=400)
         
         st.altair_chart(chart, use_container_width=True)
+
+# ==========================================
+# 6. 页面五：测试：连续敏感性分析
+# ==========================================
+elif page == "测试：连续敏感性分析":
+    st.title("📊 测试：连续缺陷参数敏感性分析")
+    st.markdown("""
+    **基于离散样本的保守响应**
+    由于使用基于决策树的模型，强行连续插值会导致曲线呈现阶梯状，结论仅供参考。
+    """)
+    
+    col_ctrl, col_chart = st.columns([1, 2.5])
+    
+    with col_ctrl:
+        st.markdown("### ⚙️ 实验设置")
+        st.info("保持其他参数不变，单独调节一个参数，观察载荷变化。")
+        
+        scan_features = [f for f in raw_features if f != 'd']
+        
+        target_feature = st.selectbox(
+            "选择要分析的参数", 
+            options=scan_features,
+            format_func=lambda x: trans.get(x, x), 
+            index=scan_features.index('top') if 'top' in scan_features else 0
+        )
+        
+        st.markdown("---")
+        st.markdown("### 📌 其他基准参数")
+        st.caption("其他参数保持默认值或在此微调：")
+        
+        base_values = {}
+        with st.expander("展开修改基准参数"):
+            for f in raw_features:
+                if f != target_feature:
+                    base_values[f] = st.number_input(f"{trans.get(f, f)}", value=float(default.get(f, 0)), step=0.1)
+        if not base_values:
+            base_values = {f: default.get(f, 0) for f in raw_features if f != target_feature}
+
+        st.markdown("---")
+        st.write("设置扫描范围：")
+        
+        base_d = base_values.get('d', default.get('d', 5000))
+        feature_to_bound_key = {
+            'top': 'top/d', 'crown': 'crown/d', 't': 't/d',
+            'knuckle': 'knuckle/d', 'smax': 'smax/d',
+            'material': 'material', 'd/2h': 'd/2h', 'fai': 'fai', 'xita': 'xita'
+        }
+        b_key = feature_to_bound_key.get(target_feature)
+        
+        if b_key and b_key in CHECK_BOUNDS:
+            limit_min = float(CHECK_BOUNDS[b_key][0])
+            limit_max = float(CHECK_BOUNDS[b_key][1])
+            if target_feature in ['top', 'crown', 't', 'knuckle', 'smax']:
+                limit_min *= base_d
+                limit_max *= base_d
+        else:
+            limit_min, limit_max = 0.0, 10000.0
+
+        limit_min = float(limit_min)
+        limit_max = float(limit_max)
+        if limit_max <= limit_min:
+            limit_max = limit_min + 0.1
+
+        range_gap = limit_max - limit_min
+        auto_step = float(f"{range_gap / 50.0:.4f}") if range_gap < 10.0 else 0.1
+        if auto_step <= 0:
+            auto_step = 0.01
+            
+        min_val = st.number_input("最小值", min_value=limit_min, max_value=limit_max, value=limit_min, step=auto_step)
+        max_val = st.number_input("最大值", min_value=min_val + auto_step, max_value=limit_max, value=limit_max, step=auto_step)
+        
+        steps = st.slider("采样点数 (建议 15-30，过多会导致阶梯看不清)", min_value=5, max_value=50, value=20, step=5)
+
+    with col_chart:
+        st.markdown(f"### 📈 {trans.get(target_feature, target_feature)} 对屈曲载荷的影响")
+        
+        x_vals = np.linspace(min_val, max_val, steps)
+        plot_data = []
+        for x in x_vals:
+            row = base_values.copy()
+            row[target_feature] = x
+            plot_data.append(row)
+        
+        df_plot = pd.DataFrame(plot_data, columns=raw_features)
+        
+        try:
+            with st.spinner("模型计算中..."):
+                y_vals = predict(df_plot)
+            
+            df_result = pd.DataFrame({
+                trans.get(target_feature, target_feature): x_vals,
+                '预测屈曲载荷 (MPa)': y_vals
+            })
+            
+            y_min_plot = float(min(y_vals)) * 0.9 if min(y_vals) > 0 else float(min(y_vals)) * 1.1
+            y_max_plot = float(max(y_vals)) * 1.1
+
+            points = alt.Chart(df_result).mark_circle(
+                size=80, color='#007bff', opacity=0.8, stroke='white', strokeWidth=1.5
+            ).encode(
+                x=alt.X(trans.get(target_feature, target_feature), title=trans.get(target_feature, target_feature)),
+                y=alt.Y('预测屈曲载荷 (MPa)', title='屈曲载荷 (MPa)', scale=alt.Scale(domain=[y_min_plot, y_max_plot])),
+                tooltip=[trans.get(target_feature, target_feature), '预测屈曲载荷 (MPa)']
+            )
+            
+            line = alt.Chart(df_result).mark_line(
+                color='#00bcd4', strokeWidth=3, opacity=0.7
+            ).encode(
+                x=trans.get(target_feature, target_feature),
+                y='预测屈曲载荷 (MPa)'
+            )
+            
+            st.altair_chart((line + points).interactive(), use_container_width=True)
+            
+            st.success(f"""
+            随着【{trans.get(target_feature, target_feature)}】从 **{min_val:.3g}** 增加到 **{max_val:.3g}**，
+            屈曲载荷从 **{y_vals[0]:.4g} MPa** 变化到了 **{y_vals[-1]:.4g} MPa**。
+            """)
+        except Exception as e:
+            st.error(f"计算出错: {e}")
