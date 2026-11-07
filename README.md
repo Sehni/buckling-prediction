@@ -7,7 +7,7 @@
 基于保密考虑。本仓库不提供真实数据，仅提供训练用数据格式
 
 ## 🌐 在线访问
-本项目已部署至 Streamlit Community Cloud，可直接通过以下链接在浏览器中运行，无需配置本地环境：
+本项目已部署至 Streamlit Community Cloud，可直接通过以下链接在浏览器中运行，无需配置本地环境：\n
 👉 **[点击此处访问预测系统](https://buckling-prediction1.streamlit.app/)**
 
 ## 🛠️ 核心功能模块
