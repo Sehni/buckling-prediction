@@ -367,10 +367,8 @@ elif page == "敏感性分析":
                 st.altair_chart((line + points).interactive(), use_container_width=True)
                 
                 st.success(f"""
-                **真实离散响应**：当前基准直径 d = **{base_values.get('d', base_d):.0f} mm**。
-                随着【{trans.get(target_feature, target_feature)}】在真实样本空间中变化，
-                屈曲载荷在 **{min(y_vals):.4g} MPa** 到 **{max(y_vals):.4g} MPa** 之间波动。
-                *（注：折线上的每一个红点均代表一组真实的训练工况，由无量纲样本精确反推得出。）*
+                **真实离散响应：**
+                *折线上的每一个红点均代表一组真实的训练工况，由无量纲样本反推得出。*
                 """)
                 
             except Exception as e:
