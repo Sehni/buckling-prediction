@@ -253,7 +253,6 @@ elif page == "敏感性分析":
     with tab1:
         st.markdown("""
         **本模块完全基于真实训练样本空间。**
-        基准参数与扫描点均取自真实数据集，杜绝任何插值造假，呈现最真实的离散响应。
         """)
         
         col_ctrl, col_chart = st.columns([1, 2.5])
@@ -468,7 +467,7 @@ elif page == "测试：连续敏感性分析":
         min_val = st.number_input("最小值", min_value=limit_min, max_value=limit_max, value=limit_min, step=auto_step)
         max_val = st.number_input("最大值", min_value=min_val + auto_step, max_value=limit_max, value=limit_max, step=auto_step)
         
-        steps = st.slider("采样点数 (建议 15-30，过多会导致阶梯看不清)", min_value=5, max_value=50, value=20, step=5)
+        steps = st.slider("采样点数", min_value=5, max_value=50, value=20, step=5)
 
     with col_chart:
         st.markdown(f"### 📈 {trans.get(target_feature, target_feature)} 对屈曲载荷的影响")
