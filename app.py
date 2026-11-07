@@ -182,7 +182,7 @@ elif page == "单次参数预测":
             """, unsafe_allow_html=True)
 
 # ==========================================
-# 4. 页面三：批量预测页
+# 4. 页面三：批量预测页（逐条校验+界面报错版）
 # ==========================================
 elif page == "批量 Excel 预测":
     st.title("批量 Excel 数据预测")
@@ -210,7 +210,7 @@ elif page == "批量 Excel 预测":
     
     if uploaded_file is not None:
         if st.button("开始批量预测", type="primary"):
-            with st.spinner("正在计算中，请稍候..."):
+            with st.spinner("正在逐条校验并计算，请稍候..."):
                 try:
                     df_upload = pd.read_excel(uploaded_file)
                     new_cols = df_upload.columns
@@ -219,17 +219,56 @@ elif page == "批量 Excel 预测":
                         st.error(f"❌ 文件缺少 {missing_cols_count} 列。请确保特征数与示例一致！")
                         st.stop()
                         
+                    # 强制替换列名，仅提取前10列特征
+                    df_upload = df_upload[new_cols[:len(raw_features)]]
                     df_upload.columns = raw_features
-                    predictions = predict(df_upload)
                     
-                    df_upload.columns = new_cols
+                    predictions = []
+                    error_logs = [] # 收集错误信息用于界面展示
+                    success_count = 0
+                    fail_count = 0
+                    
+                    progress_bar = st.progress(0)
+                    total_rows = len(df_upload)
+                    
+                    # 逐行遍历
+                    for idx, row in df_upload.iterrows():
+                        single_df = pd.DataFrame([row], columns=raw_features)
+                        
+                        # Excel 中的行号（表头是第1行，所以数据行从 2 开始）
+                        excel_row_num = idx + 2 
+                        
+                        try:
+                            pred_val = predict(single_df)[0]
+                            predictions.append(pred_val)
+                            success_count += 1
+                        except Exception as e:
+                            # 如果是越界报错，预测值填充 NaN，并记录行号和原因
+                            predictions.append(np.nan) 
+                            error_logs.append(f"第 {excel_row_num} 行：{str(e)}")
+                            fail_count += 1
+                        
+                        progress_bar.progress((idx + 1) / total_rows)
+                        
+                    # 还原表头并追加预测结果列
+                    df_upload.columns = new_cols[:len(raw_features)]
                     df_upload['预测屈曲载荷(MPa)'] = predictions
                     
+                    # 根据是否成功给出提示
+                    if fail_count > 0:
+                        st.warning(f"⚠️ 处理完成！成功预测 {success_count} 条，因参数越界拦截 {fail_count} 条。拦截行的预测结果已留空，详情请查看下方报错说明。")
+                        # 将报错信息放入折叠面板中，避免界面太乱
+                        with st.expander("🔍 查看被拦截的具体行数与原因", expanded=True):
+                            for log in error_logs:
+                                st.write(log)
+                    else:
+                        st.success(f"✅ 全部成功！共处理了 {success_count} 条数据。")
+                    
+                    # 生成下载流
                     output_stream = io.BytesIO()
                     with pd.ExcelWriter(output_stream, engine='openpyxl') as writer:
                         df_upload.to_excel(writer, index=False)
                     
-                    st.success(f"✅ 预测完成！共成功处理了 {len(df_upload)} 条数据。")
                     st.download_button(
                         label="📥 点击下载预测结果 (Excel)",
                         data=output_stream.getvalue(),
@@ -239,7 +278,7 @@ elif page == "批量 Excel 预测":
                     )
                     
                 except Exception as e:
-                    st.error(f"❌ 处理失败，错误信息：{e}")
+                    st.error(f"❌ 文件读取或系统处理失败：{e}")
 
 # ==========================================
 # 5. 页面四：敏感性分析 (含离散分析与特征重要性)
