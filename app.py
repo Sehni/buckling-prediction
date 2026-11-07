@@ -112,12 +112,12 @@ def predict(input_df):
 # 1. 侧边栏导航
 # ==========================================
 st.sidebar.title("🛡️ 导航菜单")
-page = st.sidebar.radio("请选择功能", ["欢迎首页", "单次参数预测", "批量 Excel 预测", "敏感性分析"])
+page = st.sidebar.radio("请选择功能", ["首页", "单次参数预测", "批量 Excel 预测", "敏感性分析"])
 
 # ==========================================
 # 2. 页面一：欢迎页
 # ==========================================
-if page == "欢迎首页":
+if page == "首页":
     st.markdown("""
         <div style="text-align: center; margin-top: 100px;">
             <h1 style="color: #2c3e50; font-size: 40px; font-weight: bold; margin-bottom: 15px;">
